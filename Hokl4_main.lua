@@ -7,22 +7,69 @@ local success, error = pcall(function()
 end)
 
 if not success then
-    warn("WindUI加载失败: " .. tostring(error))
-    -- 创建简单的错误显示UI
+    local errorMsg = tostring(error)
+    warn("WindUI加载失败: " .. errorMsg)
+    
+    -- 创建详细的错误显示UI
     local errorGui = Instance.new("ScreenGui")
     errorGui.Name = "ErrorUI"
     errorGui.Parent = game:GetService("CoreGui")
+    AddTempUI(errorGui)
     
-    local errorLabel = Instance.new("TextLabel")
-    errorLabel.Size = UDim2.new(0, 400, 0, 100)
-    errorLabel.Position = UDim2.new(0.5, -200, 0.5, -50)
-    errorLabel.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-    errorLabel.TextColor3 = Color3.new(1, 1, 1)
-    errorLabel.Text = "WindUI加载失败: " .. tostring(error)
-    errorLabel.TextWrapped = true
-    errorLabel.Parent = errorGui
+    local errorFrame = Instance.new("Frame")
+    errorFrame.Size = UDim2.new(0, 500, 0, 200)
+    errorFrame.Position = UDim2.new(0.5, -250, 0.5, -100)
+    errorFrame.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    errorFrame.BorderSizePixel = 2
+    errorFrame.BorderColor3 = Color3.new(0, 0, 0)
+    errorFrame.Parent = errorGui
     
-    errorLabel.Text = errorLabel.Text .. "\n请检查网络连接或WindUI URL是否正确"
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 30)
+    titleLabel.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Text = "WindUI加载失败"
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 18
+    titleLabel.Parent = errorFrame
+    
+    local errorDetails = Instance.new("TextLabel")
+    errorDetails.Size = UDim2.new(1, -20, 1, -70)
+    errorDetails.Position = UDim2.new(0, 10, 0, 30)
+    errorDetails.BackgroundTransparency = 1
+    errorDetails.TextColor3 = Color3.new(1, 1, 1)
+    errorDetails.Text = "错误信息: " .. errorMsg .. "\n\n"
+    
+    -- 根据错误类型显示不同的解决方案
+    if errorMsg:find("Blocked function") then
+        errorDetails.Text = errorDetails.Text .. "解决方案:\n"
+        errorDetails.Text = errorDetails.Text .. "1. 确保您使用的脚本注入工具支持loadstring\n"
+        errorDetails.Text = errorDetails.Text .. "2. 检查工具设置，确保允许执行动态代码\n"
+        errorDetails.Text = errorDetails.Text .. "3. 尝试更新脚本注入工具到最新版本\n"
+        errorDetails.Text = errorDetails.Text .. "4. 检查WindUI URL是否正确"
+    else
+        errorDetails.Text = errorDetails.Text .. "解决方案:\n"
+        errorDetails.Text = errorDetails.Text .. "1. 检查网络连接是否正常\n"
+        errorDetails.Text = errorDetails.Text .. "2. 确保WindUI URL正确\n"
+        errorDetails.Text = errorDetails.Text .. "3. 检查防火墙是否阻止了连接\n"
+        errorDetails.Text = errorDetails.Text .. "4. 尝试使用VPN连接"
+    end
+    
+    errorDetails.TextWrapped = true
+    errorDetails.TextSize = 14
+    errorDetails.Parent = errorFrame
+    
+    local closeButton = Instance.new("TextButton")
+    closeButton.Size = UDim2.new(0, 100, 0, 30)
+    closeButton.Position = UDim2.new(0.5, -50, 1, -35)
+    closeButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    closeButton.TextColor3 = Color3.new(1, 1, 1)
+    closeButton.Text = "关闭"
+    closeButton.Parent = errorFrame
+    closeButton.MouseButton1Click:Connect(function()
+        errorGui:Destroy()
+    end)
+    
     return
 end
 
