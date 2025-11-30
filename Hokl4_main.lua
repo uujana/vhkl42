@@ -1,7 +1,8 @@
 -- 添加错误处理来检查WindUI加载
 local WindUI
 local success, error = pcall(function()
-    local windUISource = game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua")
+    local HttpService = game:GetService("HttpService")
+    local windUISource = HttpService:GetAsync("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua", true)
     WindUI = loadstring(windUISource)()
 end)
 
@@ -64,51 +65,122 @@ Tabs.Main:Button({
     end
 })
 
+Tabs.Main:Toggle({
+    Title = "调试模式",
+    Desc = "启用或禁用调试模式，显示详细日志",
+    Value = false,
+    Callback = function(state)
+        ToggleDebugMode(state)
+    end
+})
+
 -- 移除原有的基础和输入标签页内容，将功能整合到新的标签页中
 
 -- 初始化变量
 local lp = game:GetService("Players").LocalPlayer
 
+-- 角色相关变量，将在角色加载时初始化
+local character, humanoid, hrp
+
+-- 角色重置处理函数
+local function onCharacterAdded(newChar)
+    warn("角色已加载: " .. newChar.Name)
+    character = newChar
+    
+    -- 确保关键部件存在
+    local success, error = pcall(function()
+        humanoid = character:WaitForChild("Humanoid", 5)
+        hrp = character:WaitForChild("HumanoidRootPart", 5)
+    end)
+    
+    if not success or not humanoid or not hrp then
+        warn("角色部件加载失败: " .. tostring(error))
+        return
+    end
+    
+    -- 监听角色死亡
+    humanoid.Died:Connect(function()
+        warn("角色已死亡")
+        -- 可以在这里添加死亡时的清理逻辑
+    end)
+    
+    -- 更新AimBot的角色引用
+    AimBot:setupCharacter(character)
+    
+    warn("角色初始化完成")
+end
+
 -- 确保角色完全加载
-local character
 if lp.Character then
-    character = lp.Character
+    onCharacterAdded(lp.Character)
 else
     warn("等待角色加载...")
-    character = lp.CharacterAdded:Wait()
-    warn("角色已加载: " .. character.Name)
+    lp.CharacterAdded:Wait()
+    onCharacterAdded(lp.Character)
 end
 
--- 确保关键部件存在
-local humanoid, hrp
-local success, error = pcall(function()
-    humanoid = character:WaitForChild("Humanoid", 5)
-    hrp = character:WaitForChild("HumanoidRootPart", 5)
-end)
-
-if not success or not humanoid or not hrp then
-    warn("角色部件加载失败: " .. tostring(error))
-    -- 创建错误提示
-    local errorGui = Instance.new("ScreenGui")
-    errorGui.Name = "CharacterErrorUI"
-    errorGui.Parent = game:GetService("CoreGui")
-    
-    local errorLabel = Instance.new("TextLabel")
-    errorLabel.Size = UDim2.new(0, 400, 0, 100)
-    errorLabel.Position = UDim2.new(0.5, -200, 0.5, -50)
-    errorLabel.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-    errorLabel.TextColor3 = Color3.new(1, 1, 1)
-    errorLabel.Text = "角色部件加载失败: " .. tostring(error)
-    errorLabel.TextWrapped = true
-    errorLabel.Parent = errorGui
-    
-    return
-end
-
-warn("角色初始化完成")
+-- 监听角色添加事件
+lp.CharacterAdded:Connect(onCharacterAdded)
 
 -- 存储所有事件连接，用于清理，防止内存泄漏
 local eventConnections = {}
+
+-- 存储所有临时创建的UI元素，用于清理
+local tempUIElements = {}
+
+-- 清理函数，用于避免内存泄漏
+local function cleanup()
+    -- 清理所有事件连接
+    for _, connection in pairs(eventConnections) do
+        if connection and typeof(connection) == "RBXScriptConnection" then
+            connection:Disconnect()
+        end
+    end
+    eventConnections = {}
+    
+    -- 清理所有临时UI元素
+    for _, ui in pairs(tempUIElements) do
+        if ui and ui.Parent then
+            ui:Destroy()
+        end
+    end
+    tempUIElements = {}
+    
+    -- 清理ESP
+    if ESP then
+        ESP:RemoveAllESP()
+    end
+    
+    -- 清理夜视效果
+    if CommonFeatures and CommonFeatures.NightVisionEffect then
+        CommonFeatures.NightVisionEffect:Destroy()
+        CommonFeatures.NightVisionEffect = nil
+    end
+    
+    DebugLog("清理完成", "Core")
+end
+
+-- 添加事件连接到管理列表
+function AddConnection(connection, moduleName)
+    table.insert(eventConnections, connection)
+    DebugLog("添加事件连接: " .. (moduleName or "Unknown"), "Core")
+end
+
+-- 添加临时UI元素到管理列表
+function AddTempUI(uiElement)
+    table.insert(tempUIElements, uiElement)
+    DebugLog("添加临时UI元素", "Core")
+end
+
+-- 监听游戏关闭事件，进行清理
+game:BindToClose(cleanup)
+
+-- 监听角色死亡事件，进行部分清理
+lp.CharacterRemoving:Connect(function()
+    DebugLog("角色移除，进行部分清理", "Core")
+    -- 清理角色相关的事件连接和UI元素
+    -- 注意：不要清理全局事件连接，只清理与当前角色相关的
+end)
 
 -- 通知函数
 function Notify(title, text, duration)
@@ -127,12 +199,34 @@ function SafeCall(func, moduleName)
     if not success then
         local errorMsg = moduleName .. " 错误: " .. tostring(err)
         warn(errorMsg)
+        -- 添加更详细的调试信息
+        local stackTrace = debug.traceback()
+        warn("堆栈跟踪: " .. stackTrace)
         return false, errorMsg
     end
     return true
 end
 
+-- 调试模式开关
+local debugMode = false
+
+-- 调试日志函数
+function DebugLog(message, moduleName)
+    if debugMode then
+        local logMsg = "[Hokl4 Debug] " .. (moduleName and "[" .. moduleName .. "] " or "") .. message
+        print(logMsg)
+    end
+end
+
+-- 调试模式切换函数
+function ToggleDebugMode(state)
+    debugMode = state
+    Notify("Hokl4", "调试模式 " .. (state and "已开启" or "已关闭"), 2)
+    DebugLog("调试模式 " .. (state and "已开启" or "已关闭"), "Core")
+end
+
 -- 通用功能模块
+-- 包含游戏中常用的辅助功能
 CommonFeatures = {
     -- 飞行功能
     FlyEnabled = false,
@@ -142,7 +236,7 @@ CommonFeatures = {
         self.FlyEnabled = state
         if state then
             Notify("Hokl4", "飞行模式已开启", 2)
-            spawn(function()
+            task.spawn(function()
                 while self.FlyEnabled and hrp and character and character:IsDescendantOf(workspace) do
                     if hrp then
                         local moveDir = Vector3.new(
@@ -156,10 +250,10 @@ CommonFeatures = {
                         
                         if hrp then
                             hrp.Velocity = moveDir.Unit * self.FlySpeed
-                        wait(0.05)  -- 添加等待时间以避免性能问题
+                        task.wait(0.05)  -- 添加等待时间以避免性能问题
                         end
                     end
-                    wait(0.05)  -- 降低更新频率以提高性能
+                    task.wait(0.05)  -- 降低更新频率以提高性能
                 end
                 if hrp then
                     hrp.Velocity = Vector3.new(0, 0, 0)
@@ -177,14 +271,14 @@ CommonFeatures = {
         self.NoClipEnabled = state
         if state then
             Notify("Hokl4", "无碰撞已开启", 2)
-            spawn(function()
+            task.spawn(function()
                 while self.NoClipEnabled do
                     for _, v in pairs(character:GetDescendants()) do
                         if v:IsA("BasePart") then
                             v.CanCollide = false
                         end
                     end
-                    wait(0.1)   -- 降低更新频率以提高性能
+                    task.wait(0.1)   -- 降低更新频率以提高性能
                 end
                 for _, v in pairs(character:GetDescendants()) do
                     if v:IsA("BasePart") then
@@ -408,7 +502,7 @@ ESP = {
     StartUpdateLoop = function(self)
         self:StopUpdateLoop()
         
-        self.updateLoop = spawn(function()
+        self.updateLoop = task.spawn(function()
             while self.enabled do
                 local updateStart = os.clock()
                 self:UpdateAllESP()
@@ -433,21 +527,31 @@ ESP = {
     
     -- 更新所有ESP
     UpdateAllESP = function(self)
+        -- 优化：使用局部变量缓存常用值
+        local players = game:GetService("Players")
+        local localPlayer = players.LocalPlayer
+        
+        -- 1. 清理无效的ESP对象
         for character, _ in pairs(self.parts) do
-            if not character or not character:FindFirstAncestorOfClass("Workspace") then
+            if not character or not character:IsDescendantOf(workspace) then
                 self:RemoveESPFromCharacter(character)
             end
         end
         
+        -- 2. 批量更新现有ESP
         for character, parts in pairs(self.parts) do
             if character and character:FindFirstChild("HumanoidRootPart") then
                 self:UpdateCharacterESP(character, parts)
             end
         end
         
-        for _, player in pairs(game:GetService("Players"):GetPlayers()) do
-            if player ~= lp and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and not self.parts[player.Character] then
-                self:AddESPToCharacter(player.Character)
+        -- 3. 只添加新玩家的ESP，优化遍历
+        for _, player in pairs(players:GetPlayers()) do
+            if player ~= localPlayer then
+                local char = player.Character
+                if char and char:FindFirstChild("HumanoidRootPart") and not self.parts[char] then
+                    self:AddESPToCharacter(char)
+                end
             end
         end
     end,
@@ -457,13 +561,15 @@ ESP = {
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
         
-        -- 修复距离计算，使用玩家位置作为参考点
-        local playerPos = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        -- 优化：缓存玩家位置
+        local playerChar = game.Players.LocalPlayer.Character
+        local playerPos = playerChar and playerChar:FindFirstChild("HumanoidRootPart")
         if not playerPos then return end
         
         local distance = (hrp.Position - playerPos.Position).Magnitude
         local shouldShow = distance <= self.config.maxDistance
         
+        -- 批量更新可见性
         for _, part in pairs(parts) do
             if part then
                 part.Enabled = shouldShow
@@ -471,21 +577,21 @@ ESP = {
         end
         
         if shouldShow then
+            -- 只在需要时更新文本
             if parts.distanceLabel then
                 parts.distanceLabel.Text = string.format("距离: %.1fm", distance)
             end
             
-            if parts.healthLabel and character:FindFirstChild("Humanoid") then
-                local humanoid = character.Humanoid
-                local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
-                parts.healthLabel.Text = "生命: " .. healthPercent .. "%"
-                
-                if healthPercent > 70 then
-                    parts.healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-                elseif healthPercent > 30 then
-                    parts.healthLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-                else
-                    parts.healthLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+            if parts.healthLabel then
+                local humanoid = character:FindFirstChild("Humanoid")
+                if humanoid then
+                    local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
+                    parts.healthLabel.Text = "生命: " .. healthPercent .. "%"
+                    
+                    -- 优化：使用条件赋值而非多个if-else
+                    parts.healthLabel.TextColor3 = healthPercent > 70 and Color3.fromRGB(0, 255, 0) or 
+                                                   healthPercent > 30 and Color3.fromRGB(255, 255, 0) or 
+                                                   Color3.fromRGB(255, 0, 0)
                 end
             end
         end
@@ -525,7 +631,7 @@ GameModules = {
             self.KillAuraEnabled = state
             if state then
                 Notify("Hokl4", "杀戮光环已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.KillAuraEnabled and hrp and character and character:IsDescendantOf(workspace) do
                         if hrp then
                             local nearbyParts = workspace:FindPartsInRegion3(Region3.new(
@@ -551,7 +657,7 @@ GameModules = {
                                 end
                             end
                         end
-                        wait(0.2)
+                        task.wait(0.2)
                     end
                 end)
             else
@@ -563,7 +669,7 @@ GameModules = {
             self.AutoTreeEnabled = state
             if state then
                 Notify("Hokl4", "自动砍树已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.AutoTreeEnabled do
                         if hrp then
                             for _, tree in pairs(workspace:GetDescendants()) do
@@ -577,7 +683,7 @@ GameModules = {
                                 end
                             end
                         end
-                        wait(0.5)
+                        task.wait(0.5)
                     end
                 end)
             else
@@ -589,18 +695,18 @@ GameModules = {
             self.AutoEatEnabled = state
             if state then
                 Notify("Hokl4", "自动进食已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.AutoEatEnabled do
                         if lp.Character and lp.Character.Humanoid.Health < lp.Character.Humanoid.MaxHealth then
                             for _, food in pairs(lp.Backpack:GetChildren()) do
                                 if food.Name:find("Food") then
                                     food.Parent = lp.Character
-                                    wait(0.1)
+                                    task.wait(0.1)
                                     break
                                 end
                             end
                         end
-                        wait(1)
+                        task.wait(1)
                     end
                 end)
             else
@@ -612,12 +718,12 @@ GameModules = {
             self.GodModeEnabled = state
             if state then
                 Notify("Hokl4", "无敌模式已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.GodModeEnabled do
                         if humanoid then
                             humanoid.Health = humanoid.MaxHealth
                         end
-                        wait(0.1)
+                        task.wait(0.1)
                     end
                 end)
             else
@@ -635,7 +741,7 @@ GameModules = {
             self.AutoHitEnabled = state
             if state then
                 Notify("Hokl4", "自动击球已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.AutoHitEnabled do
                         if hrp then
                             local ball = workspace:FindFirstChild("Ball")
@@ -648,7 +754,7 @@ GameModules = {
                                 end
                             end
                         end
-                        wait(0.05)
+                        task.wait(0.05)
                     end
                 end)
             else
@@ -703,7 +809,7 @@ GameModules = {
                     end
                 end
                 
-                spawn(function()
+                task.spawn(function()
                     while self.AutoDodgeEnabled do
                         SafeCall(function()
                             local character = game.Players.LocalPlayer.Character
@@ -727,7 +833,7 @@ GameModules = {
                                 end
                             end
                         end)
-                        wait(0.05)
+                        task.wait(0.05)
                     end
                 end)
             else
@@ -752,7 +858,7 @@ GameModules = {
             self.AutoCollect = state
             if state then
                 Notify("Hokl4", "Doors自动收集已开启", 2)
-                spawn(function()
+                task.spawn(function()
                     while self.AutoCollect and hrp and character and character:IsDescendantOf(workspace) do
                         if hrp then
                             local nearbyParts = workspace:FindPartsInRegion3(Region3.new(
@@ -764,13 +870,13 @@ GameModules = {
                                 if (item.Name:find("Key") or item.Name:find("Item")) then
                                     if (item.Position - hrp.Position).Magnitude < 15 then
                                         hrp.CFrame = CFrame.new(item.Position)
-                                        wait(0.5)
+                                        task.wait(0.5)
                                         break
                                     end
                                 end
                             end
                         end
-                        wait(0.2)
+                        task.wait(0.2)
                     end
                 end)
             else
