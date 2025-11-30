@@ -1,4 +1,29 @@
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+-- 添加错误处理来检查WindUI加载
+local WindUI
+local success, error = pcall(function()
+    local windUISource = game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua")
+    WindUI = loadstring(windUISource)()
+end)
+
+if not success then
+    warn("WindUI加载失败: " .. tostring(error))
+    -- 创建简单的错误显示UI
+    local errorGui = Instance.new("ScreenGui")
+    errorGui.Name = "ErrorUI"
+    errorGui.Parent = game:GetService("CoreGui")
+    
+    local errorLabel = Instance.new("TextLabel")
+    errorLabel.Size = UDim2.new(0, 400, 0, 100)
+    errorLabel.Position = UDim2.new(0.5, -200, 0.5, -50)
+    errorLabel.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    errorLabel.TextColor3 = Color3.new(1, 1, 1)
+    errorLabel.Text = "WindUI加载失败: " .. tostring(error)
+    errorLabel.TextWrapped = true
+    errorLabel.Parent = errorGui
+    
+    errorLabel.Text = errorLabel.Text .. "\n请检查网络连接或WindUI URL是否正确"
+    return
+end
 
 
 local Window = WindUI:CreateWindow({
@@ -43,9 +68,44 @@ Tabs.Main:Button({
 
 -- 初始化变量
 local lp = game:GetService("Players").LocalPlayer
-local character = lp.Character or lp.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local hrp = character:WaitForChild("HumanoidRootPart")
+
+-- 确保角色完全加载
+local character
+if lp.Character then
+    character = lp.Character
+else
+    warn("等待角色加载...")
+    character = lp.CharacterAdded:Wait()
+    warn("角色已加载: " .. character.Name)
+end
+
+-- 确保关键部件存在
+local humanoid, hrp
+local success, error = pcall(function()
+    humanoid = character:WaitForChild("Humanoid", 5)
+    hrp = character:WaitForChild("HumanoidRootPart", 5)
+end)
+
+if not success or not humanoid or not hrp then
+    warn("角色部件加载失败: " .. tostring(error))
+    -- 创建错误提示
+    local errorGui = Instance.new("ScreenGui")
+    errorGui.Name = "CharacterErrorUI"
+    errorGui.Parent = game:GetService("CoreGui")
+    
+    local errorLabel = Instance.new("TextLabel")
+    errorLabel.Size = UDim2.new(0, 400, 0, 100)
+    errorLabel.Position = UDim2.new(0.5, -200, 0.5, -50)
+    errorLabel.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    errorLabel.TextColor3 = Color3.new(1, 1, 1)
+    errorLabel.Text = "角色部件加载失败: " .. tostring(error)
+    errorLabel.TextWrapped = true
+    errorLabel.Parent = errorGui
+    
+    return
+end
+
+warn("角色初始化完成")
 
 -- 存储所有事件连接，用于清理，防止内存泄漏
 local eventConnections = {}
@@ -397,7 +457,11 @@ ESP = {
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
         
-        local distance = (hrp.Position - hrp.Position).Magnitude
+        -- 修复距离计算，使用玩家位置作为参考点
+        local playerPos = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not playerPos then return end
+        
+        local distance = (hrp.Position - playerPos.Position).Magnitude
         local shouldShow = distance <= self.config.maxDistance
         
         for _, part in pairs(parts) do
